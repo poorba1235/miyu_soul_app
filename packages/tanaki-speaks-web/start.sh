@@ -4,13 +4,13 @@ set -euo pipefail
 # --------------------------
 # Environment variables
 # --------------------------
-export PORT="${PORT:-3002}"                      # Fly's internal_port
+export PORT="${PORT:-3002}"                      # Fly internal_port
 export DEBUG_SERVER_PORT="${DEBUG_SERVER_PORT:-4000}"
 export CODE_PATH="${CODE_PATH:-/app/data}"
 export PGLITE_DATA_DIR="${PGLITE_DATA_DIR:-/app/data/pglite}"
 export METRICS_PORT="${METRICS_PORT:-9091}"
 
-# Ensure necessary directories exist
+# Ensure required directories exist
 mkdir -p "${CODE_PATH}" "${PGLITE_DATA_DIR}"
 
 # --------------------------
@@ -42,6 +42,7 @@ sleep 3
   fi
 
   chmod +x "${CLI_PATH}" || true
+  # Run local CLI to register blueprint
   "${CLI_PATH}" dev --once --noopen || bun "${CLI_PATH}" dev --once --noopen
 )
 
@@ -50,9 +51,14 @@ sleep 3
 # --------------------------
 cd /app/packages/tanaki-speaks-web
 echo "[boot] starting frontend server on port ${PORT}..."
-exec PORT="${PORT}" bun run ./bun-server.ts
+exec PORT="${PORT}" bun run ./bun-server.ts || {
+  echo "[error] frontend failed to start"
+  # Stop Soul Engine before exiting
+  kill "${SOUL_ENGINE_PID}" || true
+  exit 1
+}
 
 # --------------------------
-# Optional: trap termination signals to clean up soul-engine
+# Graceful shutdown
 # --------------------------
 trap "echo '[shutdown] stopping soul-engine...'; kill ${SOUL_ENGINE_PID} || true" SIGINT SIGTERM
