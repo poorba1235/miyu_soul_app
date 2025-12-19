@@ -1,64 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# --------------------------
-# Environment variables
-# --------------------------
-export PORT="${PORT:-3002}"                      # Fly internal_port
 export DEBUG_SERVER_PORT="${DEBUG_SERVER_PORT:-4000}"
 export CODE_PATH="${CODE_PATH:-/app/data}"
 export PGLITE_DATA_DIR="${PGLITE_DATA_DIR:-/app/data/pglite}"
-export METRICS_PORT="${METRICS_PORT:-9091}"
+export PORT="${PORT:-3002}"
 
-# Ensure required directories exist
-mkdir -p "${CODE_PATH}" "${PGLITE_DATA_DIR}"
+# mkdir -p "${CODE_PATH}" "${PGLITE_DATA_DIR}"
 
-# --------------------------
-# Start Soul Engine (internal only)
-# --------------------------
+# Start soul-engine (internal only)
 (
   cd /app/opensouls/packages/soul-engine-cloud
-  echo "[boot] starting soul-engine on port ${DEBUG_SERVER_PORT}..."
   exec bun run scripts/run-server.ts "${CODE_PATH}"
 ) &
 
-SOUL_ENGINE_PID=$!
-
-# Give the engine a moment to boot
+# Give the engine a moment to boot (pglite bootstrap + worker pool).
 sleep 3
 
-# --------------------------
-# Register the Tanaki-Speaks blueprint
-# --------------------------
+# Register the soul blueprint with the running engine on every boot.
+# This is intentionally in start.sh (not Dockerfile) because the CLI requires a live websocket connection.
+echo "[boot] registering tanaki-speaks blueprint..."
 (
   cd /app/packages/tanaki-speaks
-  echo "[boot] registering tanaki-speaks blueprint..."
-  
-  CLI_PATH="/app/opensouls/packages/cli/bin/run.js"
-  if [ ! -f "${CLI_PATH}" ]; then
-    echo "[boot] ERROR: missing CLI at ${CLI_PATH}"
+  echo "[boot] using local CLI: /app/opensouls/packages/cli/bin/run.js"
+  if [ ! -f /app/opensouls/packages/cli/bin/run.js ]; then
+    echo "[boot] ERROR: missing /app/opensouls/packages/cli/bin/run.js"
     ls -la /app/opensouls/packages/cli || true
     exit 1
   fi
 
-  chmod +x "${CLI_PATH}" || true
-  # Run local CLI to register blueprint
-  "${CLI_PATH}" dev --once --noopen || bun "${CLI_PATH}" dev --once --noopen
+  # Avoid `bunx soul-engine` which may try to download `soul-engine@latest`.
+  # Execute the local CLI entrypoint directly (shebang uses bun).
+  chmod +x /app/opensouls/packages/cli/bin/run.js || true
+  /app/opensouls/packages/cli/bin/run.js dev --once --noopen \
+    || bun /app/opensouls/packages/cli/bin/run.js dev --once --noopen
 )
 
-# --------------------------
-# Start Bun frontend server (public)
-# --------------------------
+# Start the Bun front server (public)
 cd /app/packages/tanaki-speaks-web
-echo "[boot] starting frontend server on port ${PORT}..."
-exec PORT="${PORT}" bun run ./bun-server.ts || {
-  echo "[error] frontend failed to start"
-  # Stop Soul Engine before exiting
-  kill "${SOUL_ENGINE_PID}" || true
-  exit 1
-}
+exec bun run ./bun-server.ts
 
-# --------------------------
-# Graceful shutdown
-# --------------------------
-trap "echo '[shutdown] stopping soul-engine...'; kill ${SOUL_ENGINE_PID} || true" SIGINT SIGTERM
