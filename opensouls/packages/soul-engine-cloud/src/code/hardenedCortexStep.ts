@@ -7,7 +7,7 @@ import { CortexStep } from "socialagi"
 import { SUPPORTED_MODELS, SupportedModel } from "@opensouls/core";
 import { logger } from "../logger.ts";
 
-const DEFAULT_MODEL = "gpt-3.5-turbo-1106"
+const DEFAULT_MODEL = "gpt-4o-mini"
 
 export const VIRTUAL_MODEL_MAP: Record<SupportedModel,string> = {
   "fast": "gpt-3.5-turbo-1106",
