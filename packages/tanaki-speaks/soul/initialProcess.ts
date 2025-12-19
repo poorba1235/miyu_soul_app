@@ -115,7 +115,7 @@ const initialProcess: MentalProcess = async ({ workingMemory }) => {
   const [withDialog, stream, dialogTextPromise] = await externalDialog(
     workingMemory,
     contextInstruction,
-    { stream: true, model: "gpt-5-mini" }
+    { stream: true, model: "gpt-4o-mini" }
   );
   speak(stream);
 
@@ -149,7 +149,7 @@ const initialProcess: MentalProcess = async ({ workingMemory }) => {
   const [withThoughts, thoughts] = await internalMonologue(
     withDialog,
     reflectionPrompt,
-    { model: "gpt-5-mini" }
+    { model: "gpt-4o-mini" }
   );
 
   log(thoughts);
