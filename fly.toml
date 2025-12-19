@@ -1,27 +1,22 @@
-# fly.toml app configuration file generated for miyu-soul-app-winter-glitter-6819 on 2025-12-19T16:08:48Z
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
-
-app = 'miyu-soul-app-winter-glitter-6819'
-primary_region = 'sin'
+app = "new-miyu-soul-app"
+primary_region = "sin"
 
 [build]
-  dockerfile = "Dockerfile"
+dockerfile = "Dockerfile"
 
 [http_service]
-  internal_port = 3002
-  force_https = true
-  auto_stop_machines = 'stop'
-  auto_start_machines = true
-  min_machines_running = 2
-  processes = ['app']
+auto_start_machines = true
+auto_stop_machines = true
+force_https = true
+internal_port = 3_002
+min_machines_running = 2
+processes = [ "app" ]
+
+[[metrics]]
+path = "/metrics"
+port = 9_091
 
 [[vm]]
-  memory = '4gb'
-  cpus = 2
-  memory_mb = 4096
-
-[metrics]
-  port = 9091
-  path = "/metrics"
+cpus = 2
+memory = "4gb"
+memory_mb = 4_096
