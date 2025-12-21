@@ -275,6 +275,105 @@ Bun.serve<WsData>({
       return handleTts(req);
     }
 
+    // Simple HTTP chat API: POST /api/chat { name?, message, org?, channel? }
+    // Forwards to Soul Engine as a developer-dispatched perception.
+    if (url.pathname === "/api/chat") {
+      // Handle CORS preflight
+      if (req.method === "OPTIONS") {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Max-Age": "86400",
+          },
+        });
+      }
+
+      if (req.method !== "POST") {
+        return jsonError("Only POST or OPTIONS allowed", 405);
+      }
+
+      try {
+        const body = await req.json();
+        const name = typeof body.name === "string" ? body.name : "User";
+        const message = typeof body.message === "string" ? body.message : "";
+        const org = typeof body.org === "string" ? body.org : "local";
+        const channel = typeof body.channel === "string" ? body.channel : "experience";
+
+        if (!message || message.trim().length === 0) {
+          return jsonError("message is required", 400);
+        }
+
+        // Open a short-lived websocket to the soul-engine and forward a perception
+        const upstreamUrl = `ws://127.0.0.1:4000/${encodeURIComponent(org)}/${encodeURIComponent(channel)}`;
+        const ws = new WebSocket(upstreamUrl);
+
+        // Wait for open then send dispatch event (developer-dispatched perception shape)
+        const sent = await new Promise<boolean>((resolve) => {
+          const done = () => resolve(true);
+          const fail = () => resolve(false);
+
+          ws.addEventListener("open", () => {
+            const perception = {
+              action: "said",
+              content: message,
+              name,
+            };
+            try {
+              ws.send(JSON.stringify(perception));
+              // close after a short timeout to let server process
+              setTimeout(() => {
+                try { ws.close(); } catch {}
+                done();
+              }, 80);
+            } catch (err) {
+              try { ws.close(); } catch {}
+              fail();
+            }
+          });
+
+          ws.addEventListener("error", () => {
+            try { ws.close(); } catch {}
+            fail();
+          });
+
+          // safety timeout
+          setTimeout(() => {
+            try { ws.close(); } catch {}
+            resolve(false);
+          }, 2000);
+        });
+
+        if (!sent) {
+          return new Response(JSON.stringify({ error: "failed to send perception to soul-engine" }), {
+            status: 502,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+            },
+          });
+        }
+
+        return new Response(JSON.stringify({ status: "accepted", message: "perception dispatched" }), {
+          status: 202,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: "invalid json body" }), {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        });
+      }
+    }
+
     // Dev mode: proxy everything else (including SPA HTML + assets) to Vite for HMR.
     if (dev) {
       if (isWebSocketRequest(req)) {
