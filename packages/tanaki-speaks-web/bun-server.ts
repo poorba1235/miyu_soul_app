@@ -1,5 +1,5 @@
-import { join, normalize } from "node:path";
 import type { ServerWebSocket } from "bun";
+import { join, normalize } from "node:path";
 import {
   incPresenceBroadcast,
   incWsConnection,
@@ -275,8 +275,6 @@ Bun.serve<WsData>({
       return handleTts(req);
     }
 
-    // Simple HTTP chat API: POST /api/chat { name?, message, org?, channel? }
-    // Forwards to Soul Engine as a developer-dispatched perception.
     if (url.pathname === "/api/chat") {
       // Handle CORS preflight
       if (req.method === "OPTIONS") {
@@ -310,10 +308,23 @@ Bun.serve<WsData>({
         const upstreamUrl = `ws://127.0.0.1:4000/${encodeURIComponent(org)}/${encodeURIComponent(channel)}`;
         const ws = new WebSocket(upstreamUrl);
 
-        // Wait for open then send dispatch event (developer-dispatched perception shape)
-        const sent = await new Promise<boolean>((resolve) => {
-          const done = () => resolve(true);
-          const fail = () => resolve(false);
+        // Wait for open then send dispatch event and listen for reply (interactionRequest)
+        const reply = await new Promise<{ text?: string; raw?: any } | null>((resolve) => {
+          let settled = false;
+
+          const cleanup = () => {
+            try { ws.close(); } catch {}
+          };
+
+          const finish = (val: { text?: string; raw?: any } | null) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resolve(val);
+          };
+
+          // Safety timeout for responses
+          const timeout = setTimeout(() => finish(null), 10000);
 
           ws.addEventListener("open", () => {
             const perception = {
@@ -323,32 +334,56 @@ Bun.serve<WsData>({
             };
             try {
               ws.send(JSON.stringify(perception));
-              // close after a short timeout to let server process
-              setTimeout(() => {
-                try { ws.close(); } catch {}
-                done();
-              }, 80);
             } catch (err) {
-              try { ws.close(); } catch {}
-              fail();
+              clearTimeout(timeout);
+              finish(null);
+            }
+          });
+
+          ws.addEventListener("message", (evt: any) => {
+            // Upstream messages are expected to be string JSON events from the engine.
+            try {
+              const data = typeof evt.data === 'string' ? JSON.parse(evt.data) : evt.data;
+
+              // The engine emits SoulEvents; look for an interactionRequest or a 'says' action.
+              if (data && data._kind === 'interactionRequest' && data.action === 'says') {
+                clearTimeout(timeout);
+                finish({ text: data.content, raw: data });
+                return;
+              }
+
+              // Some engine variants may wrap events differently
+              if (data && data.type === 'interactionRequest' && data.action === 'says') {
+                clearTimeout(timeout);
+                finish({ text: data.content, raw: data });
+                return;
+              }
+
+              // If the upstream sends a 'says' event directly
+              if (data && data.action === 'says' && typeof data.content === 'string') {
+                clearTimeout(timeout);
+                finish({ text: data.content, raw: data });
+                return;
+              }
+            } catch (err) {
+              // ignore parse errors
             }
           });
 
           ws.addEventListener("error", () => {
-            try { ws.close(); } catch {}
-            fail();
+            clearTimeout(timeout);
+            finish(null);
           });
 
-          // safety timeout
-          setTimeout(() => {
-            try { ws.close(); } catch {}
-            resolve(false);
-          }, 2000);
+          ws.addEventListener("close", () => {
+            clearTimeout(timeout);
+            finish(null);
+          });
         });
 
-        if (!sent) {
-          return new Response(JSON.stringify({ error: "failed to send perception to soul-engine" }), {
-            status: 502,
+        if (!reply) {
+          return new Response(JSON.stringify({ error: "no reply from soul-engine" }), {
+            status: 504,
             headers: {
               "Content-Type": "application/json",
               "Access-Control-Allow-Origin": "*",
@@ -356,8 +391,8 @@ Bun.serve<WsData>({
           });
         }
 
-        return new Response(JSON.stringify({ status: "accepted", message: "perception dispatched" }), {
-          status: 202,
+        return new Response(JSON.stringify({ status: "ok", reply: reply.text ?? null, raw: reply.raw }), {
+          status: 200,
           headers: {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
