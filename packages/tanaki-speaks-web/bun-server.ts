@@ -275,139 +275,94 @@ Bun.serve<WsData>({
       return handleTts(req);
     }
 
-    if (url.pathname === "/api/chat") {
-      // Handle CORS preflight
-      if (req.method === "OPTIONS") {
-        return new Response(null, {
-          status: 204,
-          headers: {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
-            "Access-Control-Max-Age": "86400",
-          },
-        });
-      }
+   if (url.pathname === "/api/chat") {
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Max-Age": "86400",
+      },
+    });
+  }
 
-      if (req.method !== "POST") {
-        return jsonError("Only POST or OPTIONS allowed", 405);
-      }
+  if (req.method !== "POST") {
+    return jsonError("Only POST or OPTIONS allowed", 405);
+  }
 
-      try {
-        const body = await req.json();
-        const name = typeof body.name === "string" ? body.name : "User";
-        const message = typeof body.message === "string" ? body.message : "";
-        const org = typeof body.org === "string" ? body.org : "local";
-        const channel = typeof body.channel === "string" ? body.channel : "experience";
+  try {
+    const body = await req.json();
+    const name = typeof body.name === "string" ? body.name : "User";
+    const message = typeof body.message === "string" ? body.message : "";
+    const org = typeof body.org === "string" ? body.org : "local";
+    const channel = typeof body.channel === "string" ? body.channel : "experience";
 
-        if (!message || message.trim().length === 0) {
-          return jsonError("message is required", 400);
+    if (!message.trim()) return jsonError("message is required", 400);
+
+    // Open WS to Soul Engine
+    const ws = new WebSocket(`ws://127.0.0.1:4000/${encodeURIComponent(org)}/${encodeURIComponent(channel)}`);
+    ws.binaryType = "arraybuffer";
+
+    const reply = await new Promise<{ text?: string; raw?: any } | null>((resolve) => {
+      let settled = false;
+
+      const finish = (val: { text?: string; raw?: any } | null) => {
+        if (settled) return;
+        settled = true;
+        try { ws.close(); } catch {}
+        resolve(val);
+      };
+
+      const timeout = setTimeout(() => finish(null), 10000); // 10s timeout
+
+      ws.addEventListener("open", () => {
+        try {
+          ws.send(JSON.stringify({ action: "said", content: message, name }));
+        } catch {
+          clearTimeout(timeout);
+          finish(null);
         }
+      });
 
-        // Open a short-lived websocket to the soul-engine and forward a perception
-        const upstreamUrl = `ws://127.0.0.1:4000/${encodeURIComponent(org)}/${encodeURIComponent(channel)}`;
-        const ws = new WebSocket(upstreamUrl);
+      ws.addEventListener("message", (evt) => {
+        try {
+          const data = typeof evt.data === "string" ? JSON.parse(evt.data) : evt.data;
 
-        // Wait for open then send dispatch event and listen for reply (interactionRequest)
-        const reply = await new Promise<{ text?: string; raw?: any } | null>((resolve) => {
-          let settled = false;
-
-          const cleanup = () => {
-            try { ws.close(); } catch {}
-          };
-
-          const finish = (val: { text?: string; raw?: any } | null) => {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            resolve(val);
-          };
-
-          // Safety timeout for responses
-          const timeout = setTimeout(() => finish(null), 10000);
-
-          ws.addEventListener("open", () => {
-            const perception = {
-              action: "said",
-              content: message,
-              name,
-            };
-            try {
-              ws.send(JSON.stringify(perception));
-            } catch (err) {
-              clearTimeout(timeout);
-              finish(null);
-            }
-          });
-
-          ws.addEventListener("message", (evt: any) => {
-            // Upstream messages are expected to be string JSON events from the engine.
-            try {
-              const data = typeof evt.data === 'string' ? JSON.parse(evt.data) : evt.data;
-
-              // The engine emits SoulEvents; look for an interactionRequest or a 'says' action.
-              if (data && data._kind === 'interactionRequest' && data.action === 'says') {
-                clearTimeout(timeout);
-                finish({ text: data.content, raw: data });
-                return;
-              }
-
-              // Some engine variants may wrap events differently
-              if (data && data.type === 'interactionRequest' && data.action === 'says') {
-                clearTimeout(timeout);
-                finish({ text: data.content, raw: data });
-                return;
-              }
-
-              // If the upstream sends a 'says' event directly
-              if (data && data.action === 'says' && typeof data.content === 'string') {
-                clearTimeout(timeout);
-                finish({ text: data.content, raw: data });
-                return;
-              }
-            } catch (err) {
-              // ignore parse errors
-            }
-          });
-
-          ws.addEventListener("error", () => {
+          // Accept the reply if it's interactionRequest or says
+          if (
+            (data._kind === "interactionRequest" && data.action === "says") ||
+            (data.type === "interactionRequest" && data.action === "says") ||
+            (data.action === "says" && typeof data.content === "string")
+          ) {
             clearTimeout(timeout);
-            finish(null);
-          });
-
-          ws.addEventListener("close", () => {
-            clearTimeout(timeout);
-            finish(null);
-          });
-        });
-
-        if (!reply) {
-          return new Response(JSON.stringify({ error: "no reply from soul-engine" }), {
-            status: 504,
-            headers: {
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": "*",
-            },
-          });
+            finish({ text: data.content, raw: data });
+          }
+        } catch {
+          // ignore
         }
+      });
 
-        return new Response(JSON.stringify({ status: "ok", reply: reply.text ?? null, raw: reply.raw }), {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-          },
-        });
-      } catch (err) {
-        return new Response(JSON.stringify({ error: "invalid json body" }), {
-          status: 400,
-          headers: {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-          },
-        });
-      }
+      ws.addEventListener("error", () => finish(null));
+      ws.addEventListener("close", () => finish(null));
+    });
+
+    if (!reply) {
+      return new Response(JSON.stringify({ error: "no reply from soul-engine" }), {
+        status: 504,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
     }
+
+    return new Response(
+      JSON.stringify({ status: "ok", reply: reply.text ?? null, raw: reply.raw }),
+      { status: 200, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
+    );
+  } catch {
+    return new Response(JSON.stringify({ error: "invalid json body" }), { status: 400 });
+  }
+}
 
     // Dev mode: proxy everything else (including SPA HTML + assets) to Vite for HMR.
     if (dev) {
