@@ -385,21 +385,35 @@ Bun.serve<WsData>({
     }
 
     // Static assets + SPA fallback
-    const filePath =
-      url.pathname === "/" ? indexPath : safeJoin(distDir, url.pathname);
+// Static assets + SPA fallback
+let filePath: string | null = null;
 
-    if (filePath) {
-      const response = await serveStaticFile(filePath, req);
-      if (response) return response;
-    }
+// Serve index.html for root
+if (url.pathname === "/") {
+  filePath = indexPath;
+} else {
+  // Try dist folder first
+  filePath = safeJoin(distDir, url.pathname);
 
-    // SPA fallback to index.html
-    const indexResponse = await serveStaticFile(indexPath, req);
-    if (indexResponse) return indexResponse;
+  // If not found in dist, try public folder
+  if (!filePath || !(await Bun.file(filePath).exists())) {
+    filePath = safeJoin(join(import.meta.dir, "public"), url.pathname);
+  }
+}
 
-    return new Response("Missing build output. Run `bun run build`.", {
-      status: 500,
-    });
+if (filePath) {
+  const response = await serveStaticFile(filePath, req);
+  if (response) return response;
+}
+
+// SPA fallback to index.html
+const indexResponse = await serveStaticFile(indexPath, req);
+if (indexResponse) return indexResponse;
+
+return new Response("Missing build output. Run `bun run build`.", {
+  status: 500,
+});
+
   },
   websocket: {
     open: (ws) => {
