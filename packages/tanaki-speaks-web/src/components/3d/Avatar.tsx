@@ -111,4 +111,4 @@ export function Avatar({ mouthOpen = 0, ...props }: AvatarProps) {
   return <primitive ref={group} object={scene} {...props} />;
 }
 
-useGLTF.preload("/models/Character2.glb");
+useGLTF.preload("/Character2.glb");
