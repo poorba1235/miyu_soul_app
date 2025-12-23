@@ -194,4 +194,4 @@ export function BackgroundScene(props: JSX.IntrinsicElements["group"]) {
   );
 }
 
-useGLTF.preload("./models/Scene_update-transformed.glb");
+useGLTF.preload("/models/Scene_update-transformed.glb");
