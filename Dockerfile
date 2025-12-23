@@ -39,6 +39,8 @@ COPY opensouls/packages/soul-engine-cloud/frozen-npm/soul-engine/ \
 # App packages
 COPY packages/tanaki-speaks/package.json packages/tanaki-speaks/
 COPY packages/tanaki-speaks-web/package.json packages/tanaki-speaks-web/
+COPY packages/tanaki-speaks-web/public ./packages/tanaki-speaks-web/public
+
 
 # Install all deps
 RUN bun install
