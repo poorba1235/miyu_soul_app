@@ -1,5 +1,5 @@
-import type { ServerWebSocket } from "bun";
 import { join, normalize } from "node:path";
+import type { ServerWebSocket } from "bun";
 import {
   incPresenceBroadcast,
   incWsConnection,
@@ -275,95 +275,6 @@ Bun.serve<WsData>({
       return handleTts(req);
     }
 
-   if (url.pathname === "/api/chat") {
-  if (req.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Max-Age": "86400",
-      },
-    });
-  }
-
-  if (req.method !== "POST") {
-    return jsonError("Only POST or OPTIONS allowed", 405);
-  }
-
-  try {
-    const body = await req.json();
-    const name = typeof body.name === "string" ? body.name : "User";
-    const message = typeof body.message === "string" ? body.message : "";
-    const org = typeof body.org === "string" ? body.org : "local";
-    const channel = typeof body.channel === "string" ? body.channel : "experience";
-
-    if (!message.trim()) return jsonError("message is required", 400);
-
-    // Open WS to Soul Engine
-    const ws = new WebSocket(`ws://127.0.0.1:4000/${encodeURIComponent(org)}/${encodeURIComponent(channel)}`);
-    ws.binaryType = "arraybuffer";
-
-    const reply = await new Promise<{ text?: string; raw?: any } | null>((resolve) => {
-      let settled = false;
-
-      const finish = (val: { text?: string; raw?: any } | null) => {
-        if (settled) return;
-        settled = true;
-        try { ws.close(); } catch {}
-        resolve(val);
-      };
-
-      const timeout = setTimeout(() => finish(null), 10000); // 10s timeout
-
-      ws.addEventListener("open", () => {
-        try {
-          ws.send(JSON.stringify({ action: "said", content: message, name }));
-        } catch {
-          clearTimeout(timeout);
-          finish(null);
-        }
-      });
-
-      ws.addEventListener("message", (evt) => {
-        try {
-          const data = typeof evt.data === "string" ? JSON.parse(evt.data) : evt.data;
-
-          // Accept the reply if it's interactionRequest or says
-          if (
-            (data._kind === "interactionRequest" && data.action === "says") ||
-            (data.type === "interactionRequest" && data.action === "says") ||
-            (data.action === "says" && typeof data.content === "string")
-          ) {
-            clearTimeout(timeout);
-            finish({ text: data.content, raw: data });
-          }
-        } catch {
-          // ignore
-        }
-      });
-
-      ws.addEventListener("error", () => finish(null));
-      ws.addEventListener("close", () => finish(null));
-    });
-
-    if (!reply) {
-      return new Response(JSON.stringify({ error: "no reply from soul-engine" }), {
-        status: 504,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      });
-    }
-
-    return new Response(
-      JSON.stringify({ status: "ok", reply: reply.text ?? null, raw: reply.raw }),
-      { status: 200, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
-    );
-  } catch {
-    return new Response(JSON.stringify({ error: "invalid json body" }), { status: 400 });
-  }
-}
-
     // Dev mode: proxy everything else (including SPA HTML + assets) to Vite for HMR.
     if (dev) {
       if (isWebSocketRequest(req)) {
@@ -385,35 +296,21 @@ Bun.serve<WsData>({
     }
 
     // Static assets + SPA fallback
-// Static assets + SPA fallback
-let filePath: string | null = null;
+    const filePath =
+      url.pathname === "/" ? indexPath : safeJoin(distDir, url.pathname);
 
-// Serve index.html for root
-if (url.pathname === "/") {
-  filePath = indexPath;
-} else {
-  // Try dist folder first
-  filePath = safeJoin(distDir, url.pathname);
+    if (filePath) {
+      const response = await serveStaticFile(filePath, req);
+      if (response) return response;
+    }
 
-  // If not found in dist, try public folder
-  if (!filePath || !(await Bun.file(filePath).exists())) {
-    filePath = safeJoin(join(import.meta.dir, "public"), url.pathname);
-  }
-}
+    // SPA fallback to index.html
+    const indexResponse = await serveStaticFile(indexPath, req);
+    if (indexResponse) return indexResponse;
 
-if (filePath) {
-  const response = await serveStaticFile(filePath, req);
-  if (response) return response;
-}
-
-// SPA fallback to index.html
-const indexResponse = await serveStaticFile(indexPath, req);
-if (indexResponse) return indexResponse;
-
-return new Response("Missing build output. Run `bun run build`.", {
-  status: 500,
-});
-
+    return new Response("Missing build output. Run `bun run build`.", {
+      status: 500,
+    });
   },
   websocket: {
     open: (ws) => {
