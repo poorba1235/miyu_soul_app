@@ -28,7 +28,7 @@ type AvatarProps = {
 
 export function Avatar({ mouthOpen = 0, ...props }: AvatarProps) {
   const group = useRef<THREE.Group>(null);
-  const { scene, animations } = useGLTF("/models/Character2.glb");
+  const { scene, animations } = useGLTF("/Character2.glb");
   const { actions } = useAnimations(animations, group);
 
   const [animation, setAnimation] = useState("Action");
