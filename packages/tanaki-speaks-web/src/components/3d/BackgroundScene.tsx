@@ -10,7 +10,7 @@ type GLTFResult = {
 
 
 export function BackgroundScene(props: JSX.IntrinsicElements["group"]) {
-  const { nodes, materials } = useGLTF("./models/Scene_update-transformed.glb") as GLTFResult;
+  const { nodes, materials } = useGLTF("/models/Scene_update-transformed.glb") as GLTFResult;
 
   const defaultMaterial = THREE.Color;
 
